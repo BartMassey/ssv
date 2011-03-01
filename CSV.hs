@@ -10,14 +10,8 @@ data C = CX Char | CCO | CNL | CN deriving (Eq, Show)
 
 label :: String -> [C]
 label csv =
-  let (s', cs) = mapAccumL next SW csv in
-  let filtered = filter (/= CN) cs in
-  trail filtered
+  let (s', cs) = mapAccumL next SW csv in cs
   where
-    trail cs =
-      case last cs of
-        CNL -> cs
-        _ -> cs ++ [CNL]
     next SW  ' '  = (SW, CN)
     next SW  '\t' = (SW, CN)
     next SW  '\n' = (SW, CNL)
@@ -45,7 +39,7 @@ collect =
     next (CX x) [] = [[[x]]]
     next (CX x) ([]:rs) = [[x]]:rs
     next (CX x) ((w:ws):rs) = ((x:w):ws):rs
-    next CCO [] = [[""]]  -- XXX shouldn't ever happen
+    next CCO [] = [["",""]]   -- no newline at end of file
     next CCO (r:rs) = ("":r):rs
     next CNL rs = [""]:rs
     next CN rs = rs
