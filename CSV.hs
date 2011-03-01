@@ -2,6 +2,7 @@
 module CSV (readCSV, showCSV)
 where
 
+import Data.Char
 import Data.List
 
 data S = SW | SX | SQ | SDQ
@@ -55,11 +56,17 @@ primShowCSV shower =
       (++ "\r\n") . intercalate "," . map (showField . shower)
       where
         showField s
-          | null (s `intersect` " \t,\"\r\n") = s
+          | all okChar s = s
           | otherwise = "\"" ++ foldr doublequote "" s ++ "\""
-                        where
-                          doublequote '\"' s' = '\"' : '\"' : s'
-                          doublequote c s' = c : s'
+            where
+              okChar '"' = False
+              okChar ',' = False
+              okChar c | isSeparator c = False
+              okChar c | isPrint c = True
+              okChar _ = False
+              doublequote '\"' s' = '\"' : '\"' : s'
+              doublequote c s' = c : s'
+
 
 showCSV :: [[String]] -> String
 showCSV = primShowCSV id
