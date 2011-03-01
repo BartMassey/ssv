@@ -1,5 +1,5 @@
 -- Copyright © 2011 Bart Massey
-module CSV (readCSV, showCSV)
+module CSV (readCSV, readCSV', showCSV, showCSV')
 where
 
 import Data.Char
@@ -48,6 +48,9 @@ collect =
 readCSV :: String -> [[String]]
 readCSV = collect . label
 
+readCSV' :: Read a => String -> [[a]]
+readCSV' = map (map read) . collect . label
+
 primShowCSV :: (a -> String) -> [[a]] -> String
 primShowCSV shower = 
   concatMap showRow
@@ -70,3 +73,6 @@ primShowCSV shower =
 
 showCSV :: [[String]] -> String
 showCSV = primShowCSV id
+
+showCSV' :: Show a => [[a]] -> String
+showCSV' = primShowCSV show
