@@ -1,9 +1,11 @@
 -- Copyright © 2011 Bart Massey
-module CSV (readCSV, readCSV', showCSV, showCSV')
+module CSV (readCSV, readCSV', showCSV, showCSV', 
+            hPutCSV, hPutCSV', writeCSVFile, writeCSVFile')
 where
 
 import Data.Char
 import Data.List
+import System.IO
 
 data S = SW | SX | SQ | SDQ
 
@@ -48,11 +50,20 @@ collect =
     next CNL rs = [""]:rs
     next CN rs = rs
 
+cleancr :: [C] -> [C]
+cleancr =
+  foldr clean1 []
+  where
+    clean1 :: C -> [C] -> [C]
+    clean1 (CX '\r') cs@(CNL : _) = cs
+    clean1 (CX '\r') cs = CNL : cs
+    clean1 c cs = c : cs
+
 readCSV :: String -> [[String]]
-readCSV = collect . label
+readCSV = collect . cleancr . label
 
 readCSV' :: Read a => String -> [[a]]
-readCSV' = map (map read) . collect . label
+readCSV' = map (map read) . readCSV
 
 primShowCSV :: (a -> String) -> [[a]] -> String
 primShowCSV shower = 
@@ -78,3 +89,26 @@ showCSV = primShowCSV id
 
 showCSV' :: Show a => [[a]] -> String
 showCSV' = primShowCSV show
+
+primPutCSV :: (a -> String) -> Handle -> [[a]] -> IO ()
+primPutCSV shower h csv = do
+  hSetEncoding h utf8
+  let nlm = NewlineMode { inputNL = nativeNewline, outputNL = CRLF }
+  hSetNewlineMode h nlm
+  hPutStr h $ primShowCSV shower csv
+
+hPutCSV :: Handle -> [[String]] -> IO ()
+hPutCSV h csv = primPutCSV id h csv
+
+hPutCSV' :: Show a => Handle -> [[a]] -> IO ()
+hPutCSV' h csv = primPutCSV show h csv
+
+writeCSVFile :: String -> [[String]] -> IO ()
+writeCSVFile path csv = do
+  h <- openFile path WriteMode
+  hPutCSV h csv
+
+writeCSVFile' :: Show a => String -> [[a]] -> IO ()
+writeCSVFile' path csv = do
+  h <- openFile path WriteMode
+  hPutCSV' h csv
