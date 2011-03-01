@@ -59,7 +59,7 @@ primShowCSV shower =
   concatMap showRow
   where
     showRow = 
-      (++ "\r\n") . intercalate "," . map (showField . shower)
+      (++ "\n") . intercalate "," . map (showField . shower)
       where
         showField s
           | all okChar s = s
@@ -72,7 +72,6 @@ primShowCSV shower =
               okChar _ = False
               doublequote '\"' s' = '\"' : '\"' : s'
               doublequote c s' = c : s'
-
 
 showCSV :: [[String]] -> String
 showCSV = primShowCSV id
