@@ -11,7 +11,10 @@ data C = CX Char | CCO | CNL | CN deriving (Eq, Show)
 
 label :: String -> [C]
 label csv =
-  let (s', cs) = mapAccumL next SW csv in cs
+  let (s', cs) = mapAccumL next SW csv in
+  case s' of
+    SQ -> error "unclosed quote in CSV"
+    _ -> cs
   where
     next SW  ' '  = (SW, CN)
     next SW  '\t' = (SW, CN)
