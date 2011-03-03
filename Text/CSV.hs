@@ -3,18 +3,37 @@
 -- Please see the file COPYING in the source
 -- distribution of this software for license terms.
 
+{-# LANGUAGE DeriveDataTypeable #-}
+
 -- | This modules provides conversion routines to and
 -- from the infamous "comma separated value" (CSV) format.
 -- It attempts to adhere to the spirit and (mostly) to the
 -- letter of RFC 4180, which defines the `text/csv` MIME
 -- type.
 module Text.CSV (readCSV, readCSV', showCSV, showCSV', 
-                 hPutCSV, hPutCSV', writeCSVFile, writeCSVFile')
+                 hPutCSV, hPutCSV', writeCSVFile, writeCSVFile',
+                 CSVReadException)
 where
 
+import Control.Exception
 import Data.Char
 import Data.List
+import Data.Typeable
 import System.IO
+
+-- | Indicates line and column and gives an error message.
+data CSVReadException = CSVReadException (Int, Int) String
+                        deriving Typeable
+
+instance Show CSVReadException where
+  show (CSVReadException (line, col) msg) =
+    show line ++ ":" ++ show col ++ ": " ++ "CSV read error: " ++ msg
+
+instance Exception CSVReadException
+
+throwCSVException :: (Int, Int) -> String -> a
+throwCSVException pos msg =
+  throw (CSVReadException pos msg)
 
 -- State of the labeler.
 data S = SW | -- reading whitespace
@@ -32,29 +51,35 @@ data C = CX Char | -- character
 -- all the characters.
 label :: String -> [C]
 label csv =
-  let (s', cs) = mapAccumL next SW csv in
+  let ((s', pos'), cs) = mapAccumL next (SW, (1, 1)) csv in
   case s' of
-    SQ -> error "unclosed quote in CSV"
+    SQ -> throwCSVException pos' "unclosed quote in CSV"
     _ -> cs
   where
-    next SW  ' '  = (SW, CN)
-    next SW  '\t' = (SW, CN)
-    next SW  '\n' = (SW, CNL)
-    next SW  '"'  = (SQ, CN)
-    next SW  ','  = (SW, CCO)
-    next SW  c    = (SX, CX c)
-    next SX '\n'  = (SW, CNL)
-    next SX '"'   = error "illegal double quote"
-    next SX ','   = (SW, CCO)
-    next SX c     = (SX, CX c)
-    next SQ  '"'  = (SDQ, CN)
-    next SQ  c    = (SQ, CX c)
-    next SDQ '\n' = (SW, CNL)
-    next SDQ '"'  = (SQ, CX '"')
-    next SDQ ' '  = (SW, CN)
-    next SDQ '\t' = (SW, CN)
-    next SDQ ','  = (SW, CCO)
-    next SDQ _    = error "illegal internal double quote"
+    next (SW, pos)  ' '  = ((SW, incc pos), CN)
+    next (SW, pos)  '\t' = ((SW, inct pos), CN)
+    next (SW, pos)  '\n' = ((SW, incl pos), CNL)
+    next (SW, pos)  '"'  = ((SQ, incc pos), CN)
+    next (SW, pos)  ','  = ((SW, incc pos), CCO)
+    next (SW, pos)  c    = ((SX, incc pos), CX c)
+    next (SX, pos)  '\n' = ((SW, incl pos), CNL)
+    next (SX, pos)  '"'  = throwCSVException pos "illegal double quote"
+    next (SX, pos)  ','  = ((SW, incc pos), CCO)
+    next (SX, pos)  '\t' = ((SX, inct pos), CX '\t')
+    next (SX, pos)  c    = ((SX, incc pos), CX c)
+    next (SQ, pos)  '"'  = ((SDQ, incc pos), CN)
+    next (SQ, pos)  '\t' = ((SQ, inct pos), CX '\t')
+    next (SQ, pos)  c    = ((SQ, incc pos), CX c)
+    next (SDQ, pos) '\n' = ((SW, incl pos), CNL)
+    next (SDQ, pos) '"'  = ((SQ, incc pos), CX '"')
+    next (SDQ, pos) ' '  = ((SW, incc pos), CN)
+    next (SDQ, pos) '\t' = ((SW, inct pos), CN)
+    next (SDQ, pos) ','  = ((SW, incc pos), CCO)
+    next (SDQ, pos) _    = throwCSVException pos "illegal closing double quote"
+    incc (line, col) = (line, col + 1)
+    incl (line, _) = (line + 1, 1)
+    inct (line, col) = (line, tcol) 
+                       where tcol = col + 8 - ((col + 7) `mod` 8)
 
 -- Convert CR / LF sequences on input to NL. Also convert
 -- other CRs to newlines. On input, LFs are already NLs.
