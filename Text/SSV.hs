@@ -5,13 +5,12 @@
 
 {-# LANGUAGE DeriveDataTypeable #-}
 
--- | This modules provides conversion routines to and
--- from the infamous "comma separated value" (CSV) format.
--- It attempts to adhere to the spirit and (mostly) to the
--- letter of RFC 4180, which defines the `text/csv` MIME
--- type.
+-- | This modules provides conversion routines to and from
+-- various "something-separated value" (SSV) formats.  In
+-- particular, it converts the infamous "comma separated
+-- value" (CSV) format.
 module Text.SSV (readCSV, showCSV, hPutCSV, writeCSVFile,
-                 CSVReadException(..))
+                 toNL, CSVReadException(..))
 where
 
 import Control.Exception
@@ -47,6 +46,17 @@ data C = CX Char | -- character
          CN        -- null token (discarded)
 
 type SP = (S, (Int, Int))
+
+-- Convert CR / LF sequences on input to LF (NL). Also convert
+-- other CRs to LF.
+toNL :: String -> String
+toNL =
+  foldr clean1 []
+  where
+    clean1 :: Char -> String -> String
+    clean1 '\r' cs@('\n' : _) = cs
+    clean1 '\r' cs = '\n' : cs
+    clean1 c cs = c : cs
 
 -- Run a state machine over the input to classify
 -- all the characters.
@@ -88,17 +98,6 @@ label csv =
     inct (line, col) = (line, tcol) 
                        where tcol = col + 8 - ((col + 7) `mod` 8)
 
--- Convert CR / LF sequences on input to NL. Also convert
--- other CRs to newlines. On input, LFs are already NLs.
-cleancr :: [C] -> [C]
-cleancr =
-  foldr clean1 []
-  where
-    clean1 :: C -> [C] -> [C]
-    clean1 (CX '\r') cs@(CNL : _) = cs
-    clean1 (CX '\r') cs = CNL : cs
-    clean1 c cs = c : cs
-
 -- Convert the class tokens into a list of rows, each
 -- consisting of a list of strings.
 collect :: [C] -> [[String]]
@@ -114,12 +113,12 @@ collect =
     next CNL rs = [""]:rs
     next CN rs = rs
 
--- | Convert a 'String' representing a CSV file into
--- a properly-parsed list of rows, each a list of 'String'
--- fields. 
+-- | Convert a 'String' representing a CSV file into a
+-- properly-parsed list of rows, each a list of 'String'
+-- fields. Adheres to the spirit and (mostly) to the letter
+-- of RFC 4180, which defines the `text/csv` MIME type.
 -- .
--- This conversion follows RFC 4180 to a reasonable
--- degree. Rows are assumed to end at an unquoted line
+-- Rows are assumed to end at an unquoted line
 -- terminator: CRLF, CR, or LF. Quoted line terminators on the
 -- input will be converted to newlines in the resulting field.
 -- (Note that this canonicalization loses the distinction between
@@ -131,7 +130,8 @@ collect =
 -- quoted field. For unquoted fields, whitespace to the left
 -- of the field is discarded, but whitespace to the right is
 -- retained; this is convenient for the parser, and probably
--- corresponds to the typical intent of CSV authors. If a
+-- corresponds to the typical intent of CSV authors. Whitespace
+-- on both sides of a quoted field is discarded. If a
 -- double-quoted fields contains two double-quotes in a row,
 -- these are treated as an escaped encoding of a single
 -- double-quote.
@@ -139,14 +139,14 @@ collect =
 -- The final line of the input may end with a line terminator,
 -- which will be ignored, or without one.
 readCSV :: String -> [[String]]
-readCSV = collect . cleancr . label
+readCSV = collect . label . toNL
 
-primShowCSV :: (a -> String) -> [[a]] -> String
-primShowCSV shower = 
+primShowCSV :: [[String]] -> String
+primShowCSV = 
   concatMap showRow
   where
     showRow = 
-      (++ "\n") . intercalate "," . map (showField . shower)
+      (++ "\n") . intercalate "," . map showField
       where
         showField s
           | all okChar s = s
@@ -161,21 +161,25 @@ primShowCSV shower =
               doublequote c s' = c : s'
 
 -- | Convert a list of rows, each a list of 'String' fields,
--- to a single 'String' CSV representation. Newline will be
--- used as the end-of-line character, and no discardable
--- whitespace will appear in fields. Fields that need to be
--- quoted because they contain a special character or line
--- terminator will be quoted; all other fields will be left
--- unquoted. The final row of CSV will end with a newline.
+-- to a single 'String' CSV representation. Adheres to the
+-- spirit and (mostly) to the letter of RFC 4180, which
+-- defines the `text/csv` MIME type.
+-- .
+-- Newline will be used as the end-of-line character, and no
+-- discardable whitespace will appear in fields. Fields that
+-- need to be quoted because they contain a special
+-- character or line terminator will be quoted; all other
+-- fields will be left unquoted. The final row of CSV will
+-- end with a newline.
 showCSV :: [[String]] -> String
-showCSV = primShowCSV id
+showCSV = primShowCSV
 
-primPutCSV :: (a -> String) -> Handle -> [[a]] -> IO ()
-primPutCSV shower h csv = do
+primPutCSV :: Handle -> [[String]] -> IO ()
+primPutCSV h csv = do
   hSetEncoding h utf8
   let nlm = NewlineMode { inputNL = nativeNewline, outputNL = CRLF }
   hSetNewlineMode h nlm
-  hPutStr h $ primShowCSV shower csv
+  hPutStr h $ primShowCSV csv
 
 -- | Put a CSV representation of the given input out on a
 -- file handle. Per RFC 4180, use CRLF as the line
@@ -184,7 +188,7 @@ primPutCSV shower h csv = do
 -- you want native line terminators, this latter method
 -- works for that.
 hPutCSV :: Handle -> [[String]] -> IO ()
-hPutCSV h csv = primPutCSV id h csv
+hPutCSV h csv = primPutCSV h csv
 
 -- | Write a CSV representation of the given input
 -- into a new file located at the given path. As with
@@ -193,3 +197,4 @@ writeCSVFile :: String -> [[String]] -> IO ()
 writeCSVFile path csv = do
   h <- openFile path WriteMode
   hPutCSV h csv
+  hClose h
