@@ -1,0 +1,14 @@
+Copyright © 2011 Bart Massey
+
+This work is available under the MIT license: please see the
+file COPYING in this distribution for license details.
+
+There are two things here: a Haskell module for read and
+show of "something-separated values", CSVs in particular,
+and a tiny demo filter program that will "clean" a CSV file.
+
+Please see ssv.cabal and the haddock docs for further
+information.
+
+    Bart Massey
+    2011-03-03
