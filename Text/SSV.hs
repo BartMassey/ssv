@@ -10,39 +10,82 @@
 -- particular, it converts the infamous "comma separated
 -- value" (CSV) format.
 module Text.SSV (readCSV, showCSV, hPutCSV, writeCSVFile,
-                 toNL, CSVReadException(..))
+                 toNL, SSVReadException(..), 
+                 SSVFormat(..), SSVFormatQuote(..),
+                 csvFormat, pwfFormat)
 where
 
 import Control.Exception
 import Data.Char
 import Data.List
+import Data.Maybe
 import Data.Typeable
 import System.IO
 
+-- | Formatting information for quoted strings for a
+-- particular SSV variant.
+data SSVFormatQuote = SSVFormatQuote {
+  ssvFormatQuoteEscape :: Maybe Char,
+  ssvFormatQuoteLeft :: Char,
+  ssvFormatQuoteRight :: Char
+}
+
+-- | Formatting information for a particular SSV variant.
+data SSVFormat = SSVFormat {
+  ssvFormatName :: String,
+  ssvFormatTerminator :: Char, -- ^ End of row.
+  ssvFormatSeparator :: Char, -- ^ Field separator.
+  ssvFormatEscape :: Maybe Char, -- ^ Escape character outside of quotes.
+  ssvFormatStripWhite :: Bool, -- ^ Strip "extraneous" spaces and tabs.
+  ssvFormatQuote :: Maybe SSVFormatQuote } -- ^ Quote format.
+
+csvFormat :: SSVFormat
+csvFormat = SSVFormat {
+  ssvFormatName = "CSV",
+  ssvFormatTerminator = '\n',
+  ssvFormatSeparator = ',',
+  ssvFormatEscape = Nothing,
+  ssvFormatStripWhite = True,
+  ssvFormatQuote = Just $ SSVFormatQuote {
+    ssvFormatQuoteEscape = Just '"',
+    ssvFormatQuoteLeft = '"',
+    ssvFormatQuoteRight = '"' } }
+
+pwfFormat :: SSVFormat
+pwfFormat = SSVFormat {
+  ssvFormatName = "Colon-separated record",
+  ssvFormatTerminator = '\n',
+  ssvFormatSeparator = ':',
+  ssvFormatEscape = Nothing,
+  ssvFormatStripWhite = False,
+  ssvFormatQuote = Nothing }
+
 -- | Indicates line and column and gives an error message.
-data CSVReadException = CSVReadException (Int, Int) String
+data SSVReadException = SSVReadException String (Int, Int) String
                         deriving Typeable
 
-instance Show CSVReadException where
-  show (CSVReadException (line, col) msg) =
-    show line ++ ":" ++ show col ++ ": " ++ "CSV read error: " ++ msg
+instance Show SSVReadException where
+  show (SSVReadException fmt (line, col) msg) =
+    fmt ++ ":" ++ show line ++ ":" ++ show col ++ ": " ++ 
+      "read error: " ++ msg
 
-instance Exception CSVReadException
+instance Exception SSVReadException
 
-throwCSVException :: (Int, Int) -> String -> a
-throwCSVException pos msg =
-  throw (CSVReadException pos msg)
+throwRE :: SSVFormat -> (Int, Int) -> String -> a
+throwRE fmt pos msg =
+  throw $ SSVReadException (ssvFormatName fmt) pos msg
 
 -- State of the labeler.
-data S = SW | -- reading whitespace
-         SX | -- reading other chars
-         SQ | -- reading quoted chars
-         SDQ  -- just saw a double quote
+data S = SW | -- reading a whitespace char
+         SX | -- reading a generic char
+         SQ | -- reading a quoted char
+         SE | -- reading an escaped char
+         SZ   -- reading a quoted-escaped char
 
 -- Class of token output from the labeler
 data C = CX Char | -- character
-         CCO |     -- comma
-         CNL |     -- newline
+         CFS |     -- field separator
+         CRS |     -- record separator
          CN        -- null token (discarded)
 
 type SP = (S, (Int, Int))
@@ -60,43 +103,78 @@ toNL =
 
 -- Run a state machine over the input to classify
 -- all the characters.
-label :: String -> [C]
-label csv =
-  run next (SW, (1, 1)) csv
+label :: SSVFormat -> String -> [C]
+label fmt csv =
+  run next (sw, (1, 1)) csv
   where
+    -- State for initialization and fallback from end of field.
+    sw
+      | ssvFormatStripWhite fmt = SW
+      | otherwise = SX
+    -- Essentially mapAccumL, but with the test at the end
+    -- so that it is fully lazy.
     run :: (SP -> Char -> (SP, C)) -> SP -> [Char] -> [C]
     run _ (s', pos') [] =
       case s' of
-        SQ -> throwCSVException pos' "unclosed quote in CSV"
+        SQ -> throwRE fmt pos' "unclosed quote in SSV"
         _ -> []
     run f s (x : xs) =
       let (s', c) = f s x in
       c : run f s' xs
-    next :: SP -> Char -> (SP, C)
-    next (SW, pos)  ' '  = ((SW, incc pos), CN)
-    next (SW, pos)  '\t' = ((SW, inct pos), CN)
-    next (SW, pos)  '\n' = ((SW, incl pos), CNL)
-    next (SW, pos)  '"'  = ((SQ, incc pos), CN)
-    next (SW, pos)  ','  = ((SW, incc pos), CCO)
-    next (SW, pos)  c    = ((SX, incc pos), CX c)
-    next (SX, pos)  '\n' = ((SW, incl pos), CNL)
-    next (SX, pos)  '"'  = throwCSVException pos "illegal double quote"
-    next (SX, pos)  ','  = ((SW, incc pos), CCO)
-    next (SX, pos)  '\t' = ((SX, inct pos), CX '\t')
-    next (SX, pos)  c    = ((SX, incc pos), CX c)
-    next (SQ, pos)  '"'  = ((SDQ, incc pos), CN)
-    next (SQ, pos)  '\t' = ((SQ, inct pos), CX '\t')
-    next (SQ, pos)  c    = ((SQ, incc pos), CX c)
-    next (SDQ, pos) '\n' = ((SW, incl pos), CNL)
-    next (SDQ, pos) '"'  = ((SQ, incc pos), CX '"')
-    next (SDQ, pos) ' '  = ((SW, incc pos), CN)
-    next (SDQ, pos) '\t' = ((SW, inct pos), CN)
-    next (SDQ, pos) ','  = ((SW, incc pos), CCO)
-    next (SDQ, pos) _    = throwCSVException pos "illegal closing double quote"
+    -- A bunch of abbreviations for concision.
+    rs = ssvFormatTerminator fmt
+    fs = ssvFormatSeparator fmt
+    efmt = ssvFormatEscape fmt
+    e = isJust efmt
+    ec = fromJust efmt
+    qfmt = ssvFormatQuote fmt
+    q = isJust qfmt
+    lq = ssvFormatQuoteLeft $ fromJust qfmt
+    rq = ssvFormatQuoteRight $ fromJust qfmt
+    qesc = ssvFormatQuoteEscape $ fromJust qfmt
+    qe = isJust qesc
+    eq = fromJust qesc
+    -- Increment the position in the input various ways.
     incc (line, col) = (line, col + 1)
     incl (line, _) = (line + 1, 1)
     inct (line, col) = (line, tcol) 
                        where tcol = col + 8 - ((col + 7) `mod` 8)
+    -- The actual state machine for the labeler.
+    next :: SP -> Char -> (SP, C)
+    next (SW, pos) ' '     = ((SW, incc pos), CN)
+    next (SW, pos) '\t'    = ((SW, inct pos), CN)
+    next (SW, pos) c 
+      | c == rs            = ((sw, incl pos), CRS)
+      | c == fs            = ((sw, incc pos), CFS)
+      | e && c == ec       = ((SE, incc pos), CN)
+      | q && c == lq       = ((SQ, incc pos), CN)
+      | otherwise          = ((SX, incc pos), CX c)
+    next (SX, pos) '\t'    = ((SX, inct pos), CX '\t')
+    next (SX, pos) c 
+      | c == rs            = ((sw, incl pos), CRS)
+      | c == fs            = ((sw, incc pos), CFS)
+      | e && c == ec       = ((SE, incc pos), CN)
+      | q && c == lq       = throwRE fmt pos "illegal quote"
+      | otherwise          = ((SX, incc pos), CX c)
+    next (SQ, pos) '\t'    = ((SQ, inct pos), CX '\t')
+    next (SQ, pos) c 
+      | c == rs            = ((sw, incl pos), CRS)
+      | q && qe && c == eq = ((SZ, incc pos), CN)
+      | q && c == rq       = ((sw, incc pos), CN)
+      | otherwise          = ((SQ, incc pos), CX c)
+    next (SE, pos) '\t'    = ((SX, inct pos), CX '\t')
+    next (SE, pos) c 
+      | c == rs            = ((SX, incl pos), CX c)
+      | otherwise          = ((SX, incc pos), CX c)
+    next (SZ, pos) '\t'    = ((SW, inct pos), CN)
+    next (SZ, pos) ' '     = ((SW, incc pos), CN)
+    next (SZ, pos)  c 
+      | c == rs            = ((sw, incl pos), CRS)
+      | c == fs            = ((sw, incc pos), CFS)
+      | q && qe && c == eq = ((SQ, incc pos), CX c)
+      | q && c == rq       = ((SQ, incc pos), CX c)
+      | q && c == lq       = ((SQ, incc pos), CX c)
+      | otherwise          = throwRE fmt pos "illegal escape"
 
 -- Convert the class tokens into a list of rows, each
 -- consisting of a list of strings.
@@ -108,9 +186,9 @@ collect =
     next (CX x) [] = [[[x]]]
     next (CX x) ([]:rs) = [[x]]:rs
     next (CX x) ((w:ws):rs) = ((x:w):ws):rs
-    next CCO [] = [["",""]]   -- no newline at end of file
-    next CCO (r:rs) = ("":r):rs
-    next CNL rs = [""]:rs
+    next CFS [] = [["",""]]   -- no newline at end of file
+    next CFS (r:rs) = ("":r):rs
+    next CRS rs = [""]:rs
     next CN rs = rs
 
 -- | Convert a 'String' representing a CSV file into a
@@ -118,11 +196,10 @@ collect =
 -- fields. Adheres to the spirit and (mostly) to the letter
 -- of RFC 4180, which defines the `text/csv` MIME type.
 -- .
--- Rows are assumed to end at an unquoted line
--- terminator: CRLF, CR, or LF. Quoted line terminators on the
--- input will be converted to newlines in the resulting field.
--- (Note that this canonicalization loses the distinction between
--- the various quoted line terminators.
+-- Rows are assumed to end at an unquoted newline. This
+-- reader treats CR as a printable character, which may not
+-- be what you want per RFC 4180. You may want to use 'toNL'
+-- to clean up line endings as desired.
 -- .
 -- Fields are expected to be separated by commas. Per RFC
 -- 4180, fields may be double-quoted: only whitespace, which
@@ -139,7 +216,7 @@ collect =
 -- The final line of the input may end with a line terminator,
 -- which will be ignored, or without one.
 readCSV :: String -> [[String]]
-readCSV = collect . label . toNL
+readCSV = collect . label csvFormat . toNL
 
 primShowCSV :: [[String]] -> String
 primShowCSV = 
