@@ -8,8 +8,8 @@
 -- It attempts to adhere to the spirit and (mostly) to the
 -- letter of RFC 4180, which defines the `text/csv` MIME
 -- type.
-module CSV (readCSV, readCSV', showCSV, showCSV', 
-            hPutCSV, hPutCSV', writeCSVFile, writeCSVFile')
+module Text.CSV (readCSV, readCSV', showCSV, showCSV', 
+                 hPutCSV, hPutCSV', writeCSVFile, writeCSVFile')
 where
 
 import Data.Char

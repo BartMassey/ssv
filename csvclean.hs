@@ -3,8 +3,7 @@
 -- Please see the file COPYING in the source
 -- distribution of this software for license terms.
 
-
-import CSV
+import Text.CSV
 
 main :: IO ()
 main = interact (showCSV . readCSV)
