@@ -12,7 +12,7 @@
 -- type.
 module Text.CSV (readCSV, readCSV', showCSV, showCSV', 
                  hPutCSV, hPutCSV', writeCSVFile, writeCSVFile',
-                 CSVReadException)
+                 CSVReadException(..))
 where
 
 import Control.Exception
@@ -47,15 +47,23 @@ data C = CX Char | -- character
          CNL |     -- newline
          CN        -- null token (discarded)
 
+type SP = (S, (Int, Int))
+
 -- Run a state machine over the input to classify
 -- all the characters.
 label :: String -> [C]
 label csv =
-  let ((s', pos'), cs) = mapAccumL next (SW, (1, 1)) csv in
-  case s' of
-    SQ -> throwCSVException pos' "unclosed quote in CSV"
-    _ -> cs
+  run next (SW, (1, 1)) csv
   where
+    run :: (SP -> Char -> (SP, C)) -> SP -> [Char] -> [C]
+    run _ (s', pos') [] =
+      case s' of
+        SQ -> throwCSVException pos' "unclosed quote in CSV"
+        _ -> []
+    run f s (x : xs) =
+      let (s', c) = f s x in
+      c : run f s' xs
+    next :: SP -> Char -> (SP, C)
     next (SW, pos)  ' '  = ((SW, incc pos), CN)
     next (SW, pos)  '\t' = ((SW, inct pos), CN)
     next (SW, pos)  '\n' = ((SW, incl pos), CNL)
