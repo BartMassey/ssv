@@ -60,8 +60,12 @@ pwfFormat = SSVFormat {
   ssvFormatStripWhite = False,
   ssvFormatQuote = Nothing }
 
--- | Indicates line and column and gives an error message.
+-- | Indicates format name, line and column and gives an error message.
 data SSVReadException = SSVReadException String (Int, Int) String
+                        deriving Typeable
+
+-- | Indicates format name and gives an error message.
+data SSVShowException = SSVShowException String String
                         deriving Typeable
 
 instance Show SSVReadException where
@@ -69,11 +73,21 @@ instance Show SSVReadException where
     fmt ++ ":" ++ show line ++ ":" ++ show col ++ ": " ++ 
       "read error: " ++ msg
 
+instance Show SSVShowException where
+  show (SSVShowException fmt msg) =
+    fmt ++ ": " ++  "show error: " ++ msg
+
 instance Exception SSVReadException
+
+instance Exception SSVShowException
 
 throwRE :: SSVFormat -> (Int, Int) -> String -> a
 throwRE fmt pos msg =
   throw $ SSVReadException (ssvFormatName fmt) pos msg
+
+throwSE :: SSVFormat -> String -> a
+throwSE fmt msg =
+  throw $ SSVShowException (ssvFormatName fmt) msg
 
 -- State of the labeler.
 data S = SW | -- reading a whitespace char
@@ -196,10 +210,10 @@ collect =
 -- fields. Adheres to the spirit and (mostly) to the letter
 -- of RFC 4180, which defines the `text/csv` MIME type.
 -- .
--- Rows are assumed to end at an unquoted newline. This
--- reader treats CR as a printable character, which may not
--- be what you want per RFC 4180. You may want to use 'toNL'
--- to clean up line endings as desired.
+-- 'toNL' is used on the input string to clean up the
+-- various line endings that might appear. Note that this
+-- may result in irreversible, undesired manglings of CRs
+-- and LFs.
 -- .
 -- Fields are expected to be separated by commas. Per RFC
 -- 4180, fields may be double-quoted: only whitespace, which
@@ -218,24 +232,46 @@ collect =
 readCSV :: String -> [[String]]
 readCSV = collect . label csvFormat . toNL
 
-primShowCSV :: [[String]] -> String
-primShowCSV = 
+primShowCSV :: SSVFormat -> [[String]] -> String
+primShowCSV fmt = 
   concatMap showRow
   where
     showRow = 
       (++ "\n") . intercalate "," . map showField
       where
+        -- List of characters that require a field to be quoted.
+        scaryChars = concat $ catMaybes [
+           Just [ssvFormatTerminator fmt],
+           Just [ssvFormatSeparator fmt],
+           fmap (:[]) $ ssvFormatEscape fmt,
+           fmap ((:[]) . ssvFormatQuoteLeft) $ ssvFormatQuote fmt, 
+           case ssvFormatStripWhite fmt of
+             True -> Just " \t"
+             False -> Nothing ]
+        -- Quote the field as needed.
         showField s
-          | all okChar s = s
-          | otherwise = "\"" ++ foldr doublequote "" s ++ "\""
+          | any notOkChar s = 
+            case ssvFormatQuote fmt of
+              Just qfmt -> quote qfmt s
+              Nothing -> 
+                case ssvFormatEscape fmt of
+                  Just ch -> escape ch s
+                  Nothing -> throwSE fmt "unquotable character in field"
+          | otherwise = s
             where
-              okChar '"' = False
-              okChar ',' = False
-              okChar c | isSeparator c = False
-              okChar c | isPrint c = True
-              okChar _ = False
-              doublequote '\"' s' = '\"' : '\"' : s'
-              doublequote c s' = c : s'
+              notOkChar c | elem c scaryChars = True
+              notOkChar c | isSeparator c = ssvFormatStripWhite fmt
+              notOkChar c | isPrint c = False
+              notOkChar _ = True
+              quote qfmt s' = [ssvFormatQuoteLeft qfmt] ++
+                             escape (fromJust $ ssvFormatQuoteEscape qfmt) s' ++
+                             [ssvFormatQuoteRight qfmt]
+              escape esc s' =
+                foldr escape1 "" s'
+                where
+                  escape1 c cs
+                    | notOkChar c = esc : c : cs
+                    | otherwise = c : cs
 
 -- | Convert a list of rows, each a list of 'String' fields,
 -- to a single 'String' CSV representation. Adheres to the
@@ -249,14 +285,14 @@ primShowCSV =
 -- fields will be left unquoted. The final row of CSV will
 -- end with a newline.
 showCSV :: [[String]] -> String
-showCSV = primShowCSV
+showCSV = primShowCSV csvFormat
 
 primPutCSV :: Handle -> [[String]] -> IO ()
 primPutCSV h csv = do
   hSetEncoding h utf8
   let nlm = NewlineMode { inputNL = nativeNewline, outputNL = CRLF }
   hSetNewlineMode h nlm
-  hPutStr h $ primShowCSV csv
+  hPutStr h $ primShowCSV csvFormat csv
 
 -- | Put a CSV representation of the given input out on a
 -- file handle. Per RFC 4180, use CRLF as the line
