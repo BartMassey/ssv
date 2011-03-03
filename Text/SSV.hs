@@ -10,8 +10,7 @@
 -- It attempts to adhere to the spirit and (mostly) to the
 -- letter of RFC 4180, which defines the `text/csv` MIME
 -- type.
-module Text.CSV (readCSV, readCSV', showCSV, showCSV', 
-                 hPutCSV, hPutCSV', writeCSVFile, writeCSVFile',
+module Text.SSV (readCSV, showCSV, hPutCSV, writeCSVFile,
                  CSVReadException(..))
 where
 
@@ -142,12 +141,6 @@ collect =
 readCSV :: String -> [[String]]
 readCSV = collect . cleancr . label
 
--- | This convenience function converts a CSV 'String' to a
--- set of fields by calling 'readCSV' and applying 'read' to
--- each field.
-readCSV' :: Read a => String -> [[a]]
-readCSV' = map (map read) . readCSV
-
 primShowCSV :: (a -> String) -> [[a]] -> String
 primShowCSV shower = 
   concatMap showRow
@@ -177,12 +170,6 @@ primShowCSV shower =
 showCSV :: [[String]] -> String
 showCSV = primShowCSV id
 
--- | This convenience function will call 'showCSV', applying
--- 'show' at the appropriate point to convert each field to
--- a 'String'.
-showCSV' :: Show a => [[a]] -> String
-showCSV' = primShowCSV show
-
 primPutCSV :: (a -> String) -> Handle -> [[a]] -> IO ()
 primPutCSV shower h csv = do
   hSetEncoding h utf8
@@ -199,12 +186,6 @@ primPutCSV shower h csv = do
 hPutCSV :: Handle -> [[String]] -> IO ()
 hPutCSV h csv = primPutCSV id h csv
 
--- | This convenience function will call 'hPutCSV', applying
--- 'show' at the appropriate point to convert each field to
--- a 'String'.
-hPutCSV' :: Show a => Handle -> [[a]] -> IO ()
-hPutCSV' h csv = primPutCSV show h csv
-
 -- | Write a CSV representation of the given input
 -- into a new file located at the given path. As with
 -- 'hPutCSV', CRLF will be used as the line terminator.
@@ -212,11 +193,3 @@ writeCSVFile :: String -> [[String]] -> IO ()
 writeCSVFile path csv = do
   h <- openFile path WriteMode
   hPutCSV h csv
-
--- | This convenience function will call 'writeCSVFile', applying
--- 'show' at the appropriate point to convert each field to
--- a 'String'.
-writeCSVFile' :: Show a => String -> [[a]] -> IO ()
-writeCSVFile' path csv = do
-  h <- openFile path WriteMode
-  hPutCSV' h csv
