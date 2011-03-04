@@ -9,10 +9,38 @@
 -- various "something-separated value" (SSV) formats.  In
 -- particular, it converts the infamous "comma separated
 -- value" (CSV) format.
-module Text.SSV (readCSV, showCSV, hPutCSV, writeCSVFile,
-                 toNL, SSVReadException(..), 
-                 SSVFormat(..), SSVFormatQuote(..),
-                 csvFormat, pwfFormat)
+module Text.SSV (
+  -- * SSV format descriptions 
+  -- | These records define a fairly flexible, if entirely
+  -- kludgy, domain-specific language for describing
+  -- "something-separate value" formats. An attempt is made
+  -- in the reader and formatter to allow for fairly
+  -- arbitrary combinations of features in a sane
+  -- way. However, your mileage may undoubtedly vary; CSV is
+  -- the only tested configuration.
+  SSVFormat(..), 
+  SSVFormatQuote(..),
+  -- * SSV read, show and IO routines
+  readSSV, 
+  showSSV, 
+  hPutSSV, 
+  writeSSVFile, 
+  -- * CSV read, show and IO routines
+  -- | CSV is a special case here both by virtue of being
+  -- the most common format and by virtue of needing a
+  -- little bit of "special" help with line endings to
+  -- conform to RFC 4180.
+  readCSV, 
+  showCSV, 
+  hPutCSV,
+  writeCSVFile,
+  toNL,
+  -- * Exceptions
+  SSVReadException(..), 
+  SSVShowException(..),
+  -- * Predefined formats
+  csvFormat, 
+  pwfFormat )
 where
 
 import Control.Exception
@@ -40,6 +68,7 @@ data SSVFormat = SSVFormat {
   ssvFormatStripWhite :: Bool, -- ^ Strip "extraneous" spaces and tabs.
   ssvFormatQuote :: Maybe SSVFormatQuote } -- ^ Quote format.
 
+-- | 'SSVFormat' for CSV data. Closely follows RFC 4180
 csvFormat :: SSVFormat
 csvFormat = SSVFormat {
   ssvFormatName = "CSV",
@@ -106,8 +135,9 @@ data C = CX Char | -- character
 
 type SP = (S, (Int, Int))
 
--- Convert CR / LF sequences on input to LF (NL). Also convert
--- other CRs to LF.
+-- | Convert CR / LF sequences on input to LF (NL). Also convert
+-- other CRs to LF. This is probably the right way to handle CSV
+-- data.
 toNL :: String -> String
 toNL =
   foldr clean1 []
@@ -213,6 +243,13 @@ collect =
     next CRS rs = [""]:rs
     next CN rs = rs
 
+-- | Read using an arbitrary 'SSVFormat'. The input is not
+-- cleaned with 'toNL'; if you want this, do it yourself.
+-- The standard SSV formats 'csvFormat' and 'pwfFormat' are
+-- provided.
+readSSV :: SSVFormat -> String -> [[String]]
+readSSV fmt = collect . label fmt
+
 -- | Convert a 'String' representing a CSV file into a
 -- properly-parsed list of rows, each a list of 'String'
 -- fields. Adheres to the spirit and (mostly) to the letter
@@ -238,10 +275,16 @@ collect =
 -- The final line of the input may end with a line terminator,
 -- which will be ignored, or without one.
 readCSV :: String -> [[String]]
-readCSV = collect . label csvFormat . toNL
+readCSV = readSSV csvFormat . toNL
 
-primShowCSV :: SSVFormat -> [[String]] -> String
-primShowCSV fmt = 
+-- | Show using an arbitrary 'SSVFormat'.  The standard SSV
+-- formats 'csvFormat' and 'pwfFormat' are provided. Some
+-- effort is made to "intelligently" quote the fields; in
+-- the worst case a 'SSVShowException' will be thrown to
+-- indicate that a field had characters that could not be
+-- quoted.
+showSSV :: SSVFormat -> [[String]] -> String
+showSSV fmt = 
   concatMap showRow
   where
     showRow = 
@@ -309,29 +352,35 @@ primShowCSV fmt =
 -- fields will be left unquoted. The final row of CSV will
 -- end with a newline.
 showCSV :: [[String]] -> String
-showCSV = primShowCSV csvFormat
+showCSV = showSSV csvFormat
 
-primPutCSV :: Handle -> [[String]] -> IO ()
-primPutCSV h csv = do
+-- | Put a representation of the given SSV input out on a
+-- file handle using the given 'SSVFormat'. Uses CRLF as the
+-- line terminator character, as recommended by RFC 4180 for
+-- CSV.  Otherwise, this function behaves as writing the
+-- output of 'showSSV' to the 'Handle'; if you want native
+-- line terminators, this latter method works for that.
+hPutSSV :: SSVFormat -> Handle -> [[String]] -> IO ()
+hPutSSV fmt h csv = do
   hSetEncoding h utf8
   let nlm = NewlineMode { inputNL = nativeNewline, outputNL = CRLF }
   hSetNewlineMode h nlm
-  hPutStr h $ primShowCSV csvFormat csv
+  hPutStr h $ showSSV fmt csv
 
--- | Put a CSV representation of the given input out on a
--- file handle. Per RFC 4180, use CRLF as the line
--- terminator character.  Otherwise, this function behaves
--- as writing the output of 'showCSV' to the 'Handle'; if
--- you want native line terminators, this latter method
--- works for that.
+-- | Perform 'hPutSSV' with 'csvFormat'.
 hPutCSV :: Handle -> [[String]] -> IO ()
-hPutCSV h csv = primPutCSV h csv
+hPutCSV = hPutSSV csvFormat
 
--- | Write a CSV representation of the given input
--- into a new file located at the given path. As with
--- 'hPutCSV', CRLF will be used as the line terminator.
-writeCSVFile :: String -> [[String]] -> IO ()
-writeCSVFile path csv = do
+-- | Write an SSV representation of the given input into a
+-- new file located at the given path, using the given
+-- 'SSVFormat'. As with 'hPutCSV', CRLF will be used as the
+-- line terminator.
+writeSSVFile :: SSVFormat -> String -> [[String]] -> IO ()
+writeSSVFile fmt path csv = do
   h <- openFile path WriteMode
-  hPutCSV h csv
+  hPutSSV fmt h csv
   hClose h
+
+-- | Perform 'writeSSVFile' with 'csvFormat'.
+writeCSVFile :: String -> [[String]] -> IO ()
+writeCSVFile = writeSSVFile csvFormat
