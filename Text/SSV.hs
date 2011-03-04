@@ -68,7 +68,7 @@ data SSVFormat = SSVFormat {
   ssvFormatStripWhite :: Bool, -- ^ Strip "extraneous" spaces and tabs.
   ssvFormatQuote :: Maybe SSVFormatQuote } -- ^ Quote format.
 
--- | 'SSVFormat' for CSV data. Closely follows RFC 4180
+-- | 'SSVFormat' for CSV data. Closely follows RFC 4180.
 csvFormat :: SSVFormat
 csvFormat = SSVFormat {
   ssvFormatName = "CSV",
@@ -81,9 +81,11 @@ csvFormat = SSVFormat {
     ssvFormatQuoteLeft = '"',
     ssvFormatQuoteRight = '"' } }
 
+-- | 'SSVFormat' for UNIX "password file" data, i.e. colon-separated
+-- fields with no escape convention.
 pwfFormat :: SSVFormat
 pwfFormat = SSVFormat {
-  ssvFormatName = "Colon-separated record",
+  ssvFormatName = "Colon-separated values",
   ssvFormatTerminator = '\n',
   ssvFormatSeparator = ':',
   ssvFormatEscape = Nothing,
@@ -94,7 +96,10 @@ pwfFormat = SSVFormat {
 data SSVReadException = SSVReadException String (Int, Int) String
                         deriving Typeable
 
--- | Indicates format name and failed field and gives an error message.
+-- | Indicates format name and failed field and gives an
+-- error message.  This should probably just be an 'error',
+-- as the calling program is really responsible for passing
+-- something formattable to the show routines.
 data SSVShowException = SSVShowException String String String
                         deriving Typeable
 
