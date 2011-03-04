@@ -19,6 +19,7 @@ import Control.Exception
 import Data.Char
 import Data.List
 import Data.Maybe
+import Data.Set hiding (map)
 import Data.Typeable
 import System.IO
 
@@ -240,7 +241,7 @@ primShowCSV fmt =
       (++ "\n") . intercalate "," . map showField
       where
         -- List of characters that require a field to be quoted.
-        scaryChars = concat $ catMaybes [
+        scaryChars = fromList $ concat $ catMaybes [
            Just [ssvFormatTerminator fmt],
            Just [ssvFormatSeparator fmt],
            fmap (:[]) $ ssvFormatEscape fmt,
@@ -252,26 +253,42 @@ primShowCSV fmt =
         showField s
           | any notOkChar s = 
             case ssvFormatQuote fmt of
-              Just qfmt -> quote qfmt s
+              Just qfmt ->
+                if isJust (ssvFormatQuoteEscape qfmt) ||
+                   not (elem (ssvFormatQuoteRight qfmt) s)
+                then quote qfmt s
+                else case ssvFormatEscape fmt of
+                     Just ch -> escape ch s
+                     Nothing -> throwSE fmt "unquotable character in field"
               Nothing -> 
                 case ssvFormatEscape fmt of
                   Just ch -> escape ch s
                   Nothing -> throwSE fmt "unquotable character in field"
           | otherwise = s
             where
-              notOkChar c | elem c scaryChars = True
+              notOkChar c | member c scaryChars = True
               notOkChar c | isSeparator c = ssvFormatStripWhite fmt
               notOkChar c | isPrint c = False
               notOkChar _ = True
               quote qfmt s' = [ssvFormatQuoteLeft qfmt] ++
-                             escape (fromJust $ ssvFormatQuoteEscape qfmt) s' ++
-                             [ssvFormatQuoteRight qfmt]
+                              qescape qfmt s' ++
+                              [ssvFormatQuoteRight qfmt]
               escape esc s' =
                 foldr escape1 "" s'
                 where
                   escape1 c cs
                     | notOkChar c = esc : c : cs
                     | otherwise = c : cs
+              qescape qfmt s' =
+                case ssvFormatQuoteEscape qfmt of
+                  Just qesc -> foldr (qescape1 qesc) "" s'
+                  Nothing -> s'
+                  where
+                    qescape1 qesc c cs
+                      | c == qesc || c == ssvFormatQuoteRight qfmt =
+                        qesc : c : cs
+                      | otherwise =
+                        c : cs
 
 -- | Convert a list of rows, each a list of 'String' fields,
 -- to a single 'String' CSV representation. Adheres to the
