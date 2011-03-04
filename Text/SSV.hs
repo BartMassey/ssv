@@ -95,7 +95,8 @@ data S = SW | -- reading a whitespace char
          SX | -- reading a generic char
          SQ | -- reading a quoted char
          SE | -- reading an escaped char
-         SZ   -- reading a quoted-escaped char
+         SZ | -- reading a quoted-escaped char
+         SD   -- reading a post-quote char
 
 -- Class of token output from the labeler
 data C = CX Char | -- character
@@ -175,14 +176,14 @@ label fmt csv =
     next (SQ, pos) c 
       | c == rs            = ((SQ, incl pos), CX c)
       | q && qe && c == eq = ((SZ, incc pos), CN)
-      | q && c == rq       = ((sw, incc pos), CN)
+      | q && c == rq       = ((SD, incc pos), CN)
       | otherwise          = ((SQ, incc pos), CX c)
     next (SE, pos) '\t'    = ((SX, inct pos), CX '\t')
     next (SE, pos) c 
       | c == rs            = ((SX, incl pos), CX c)
       | otherwise          = ((SX, incc pos), CX c)
-    next (SZ, pos) '\t'    = ((SW, inct pos), CN)
-    next (SZ, pos) ' '     = ((SW, incc pos), CN)
+    next (SZ, pos) '\t'    = ((SD, inct pos), CN)
+    next (SZ, pos) ' '     = ((SD, incc pos), CN)
     next (SZ, pos)  c 
       | c == rs            = ((sw, incl pos), CRS)
       | c == fs            = ((sw, incc pos), CFS)
@@ -190,6 +191,12 @@ label fmt csv =
       | q && c == rq       = ((SQ, incc pos), CX c)
       | q && c == lq       = ((SQ, incc pos), CX c)
       | otherwise          = throwRE fmt pos "illegal escape"
+    next (SD, pos) ' '     = ((SD, incc pos), CN)
+    next (SD, pos) '\t'    = ((SD, inct pos), CN)
+    next (SD, pos) c 
+      | c == rs            = ((sw, incl pos), CRS)
+      | c == fs            = ((sw, incc pos), CFS)
+      | otherwise          = throwRE fmt pos "junk after quoted field"
 
 -- Convert the class tokens into a list of rows, each
 -- consisting of a list of strings.
