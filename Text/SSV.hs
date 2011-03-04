@@ -6,14 +6,14 @@
 {-# LANGUAGE DeriveDataTypeable #-}
 
 -- | This modules provides conversion routines to and from
--- various "something-separated value" (SSV) formats.  In
--- particular, it converts the infamous "comma separated
--- value" (CSV) format.
+-- various \"something-separated value\" (SSV) formats.  In
+-- particular, it converts the infamous \"comma separated
+-- value\" (CSV) format.
 module Text.SSV (
   -- * SSV format descriptions 
   -- | These records define a fairly flexible, if entirely
   -- kludgy, domain-specific language for describing
-  -- "something-separate value" formats. An attempt is made
+  -- \"something-separated value\" formats. An attempt is made
   -- in the reader and formatter to allow for fairly
   -- arbitrary combinations of features in a sane
   -- way. However, your mileage may undoubtedly vary; CSV is
@@ -25,11 +25,11 @@ module Text.SSV (
   showSSV, 
   hPutSSV, 
   writeSSVFile, 
-  -- * CSV read, show and IO routines
-  -- | CSV is a special case here both by virtue of being
-  -- the most common format and by virtue of needing a
-  -- little bit of "special" help with line endings to
-  -- conform to RFC 4180.
+  -- * CSV read, show and IO routines 
+  -- | CSV is a special case here. Partly this is by virtue
+  -- of being the most common format.  CSV also needs a
+  -- little bit of \"special\" help with input line endings
+  -- to conform to RFC 4180.
   readCSV, 
   showCSV, 
   hPutCSV,
@@ -81,7 +81,7 @@ csvFormat = SSVFormat {
     ssvFormatQuoteLeft = '"',
     ssvFormatQuoteRight = '"' } }
 
--- | 'SSVFormat' for UNIX "password file" data, i.e. colon-separated
+-- | 'SSVFormat' for UNIX \"password file\" data, i.e. colon-separated
 -- fields with no escape convention.
 pwfFormat :: SSVFormat
 pwfFormat = SSVFormat {
@@ -259,12 +259,12 @@ readSSV fmt = collect . label fmt
 -- properly-parsed list of rows, each a list of 'String'
 -- fields. Adheres to the spirit and (mostly) to the letter
 -- of RFC 4180, which defines the `text/csv` MIME type.
--- .
+-- 
 -- 'toNL' is used on the input string to clean up the
 -- various line endings that might appear. Note that this
 -- may result in irreversible, undesired manglings of CRs
 -- and LFs.
--- .
+-- 
 -- Fields are expected to be separated by commas. Per RFC
 -- 4180, fields may be double-quoted: only whitespace, which
 -- is discarded, may appear outside the double-quotes of a
@@ -276,7 +276,7 @@ readSSV fmt = collect . label fmt
 -- double-quoted fields contains two double-quotes in a row,
 -- these are treated as an escaped encoding of a single
 -- double-quote.
--- .
+-- 
 -- The final line of the input may end with a line terminator,
 -- which will be ignored, or without one.
 readCSV :: String -> [[String]]
@@ -284,8 +284,8 @@ readCSV = readSSV csvFormat . toNL
 
 -- | Show using an arbitrary 'SSVFormat'.  The standard SSV
 -- formats 'csvFormat' and 'pwfFormat' are provided. Some
--- effort is made to "intelligently" quote the fields; in
--- the worst case a 'SSVShowException' will be thrown to
+-- effort is made to \"intelligently\" quote the fields; in
+-- the worst case an 'SSVShowException' will be thrown to
 -- indicate that a field had characters that could not be
 -- quoted.
 showSSV :: SSVFormat -> [[String]] -> String
@@ -350,7 +350,7 @@ showSSV fmt =
 -- to a single 'String' CSV representation. Adheres to the
 -- spirit and (mostly) to the letter of RFC 4180, which
 -- defines the `text/csv` MIME type.
--- .
+-- 
 -- Newline will be used as the end-of-line character, and no
 -- discardable whitespace will appear in fields. Fields that
 -- need to be quoted because they contain a special
