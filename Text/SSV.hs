@@ -94,8 +94,8 @@ pwfFormat = SSVFormat {
 data SSVReadException = SSVReadException String (Int, Int) String
                         deriving Typeable
 
--- | Indicates format name and gives an error message.
-data SSVShowException = SSVShowException String String
+-- | Indicates format name and failed field and gives an error message.
+data SSVShowException = SSVShowException String String String
                         deriving Typeable
 
 instance Show SSVReadException where
@@ -104,8 +104,8 @@ instance Show SSVReadException where
       "read error: " ++ msg
 
 instance Show SSVShowException where
-  show (SSVShowException fmt msg) =
-    fmt ++ ": " ++  "show error: " ++ msg
+  show (SSVShowException fmt s msg) =
+    fmt ++ ": field " ++ show s ++ ": show error: " ++ msg
 
 instance Exception SSVReadException
 
@@ -115,9 +115,9 @@ throwRE :: SSVFormat -> (Int, Int) -> String -> a
 throwRE fmt pos msg =
   throw $ SSVReadException (ssvFormatName fmt) pos msg
 
-throwSE :: SSVFormat -> String -> a
-throwSE fmt msg =
-  throw $ SSVShowException (ssvFormatName fmt) msg
+throwSE :: SSVFormat -> String -> String -> a
+throwSE fmt s msg =
+  throw $ SSVShowException (ssvFormatName fmt) s msg
 
 -- State of the labeler.
 data S = SW | -- reading a whitespace char
@@ -290,7 +290,8 @@ showSSV fmt =
     showRow = 
       (++ "\n") . intercalate "," . map showField
       where
-        -- List of characters that require a field to be quoted.
+        -- Set of characters that require a field to be quoted.
+        -- XXX This maybe could be kludgier, but I don't know how.
         scaryChars = fromList $ concat $ catMaybes [
            Just [ssvFormatTerminator fmt],
            Just [ssvFormatSeparator fmt],
@@ -309,11 +310,11 @@ showSSV fmt =
                 then quote qfmt s
                 else case ssvFormatEscape fmt of
                      Just ch -> escape ch s
-                     Nothing -> throwSE fmt "unquotable character in field"
+                     Nothing -> throwSE fmt s "unquotable character in field"
               Nothing -> 
                 case ssvFormatEscape fmt of
                   Just ch -> escape ch s
-                  Nothing -> throwSE fmt "unquotable character in field"
+                  Nothing -> throwSE fmt s "unquotable character in field"
           | otherwise = s
             where
               notOkChar c | member c scaryChars = True
