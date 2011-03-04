@@ -173,7 +173,7 @@ label fmt csv =
       | otherwise          = ((SX, incc pos), CX c)
     next (SQ, pos) '\t'    = ((SQ, inct pos), CX '\t')
     next (SQ, pos) c 
-      | c == rs            = ((sw, incl pos), CRS)
+      | c == rs            = ((SQ, incl pos), CX c)
       | q && qe && c == eq = ((SZ, incc pos), CN)
       | q && c == rq       = ((sw, incc pos), CN)
       | otherwise          = ((SQ, incc pos), CX c)
