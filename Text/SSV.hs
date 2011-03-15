@@ -34,7 +34,9 @@ module Text.SSV (
   showCSV, 
   hPutCSV,
   writeCSVFile,
+  -- * Newline conversions
   toNL,
+  fromNL,
   -- * Exceptions
   SSVReadException(..), 
   SSVShowException(..),
@@ -151,6 +153,16 @@ toNL =
     clean1 '\r' cs@('\n' : _) = cs
     clean1 '\r' cs = '\n' : cs
     clean1 c cs = c : cs
+
+-- | Convert LF (NL) sequences on input to CR LF. Leaves
+-- | other CRs alone.
+fromNL :: String -> String
+fromNL =
+  foldr dirty1 []
+  where
+    dirty1 :: Char -> String -> String
+    dirty1 '\n' cs = '\r' : '\n' : cs
+    dirty1 c cs = c : cs
 
 -- Run a state machine over the input to classify
 -- all the characters.
