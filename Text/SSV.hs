@@ -94,6 +94,7 @@ pwfFormat = SSVFormat {
 
 -- | Indicates format name, line and column and gives an error message.
 data SSVReadException = SSVReadException String (Int, Int) String
+     		      | SSVEOFException String String
                         deriving Typeable
 
 -- | Indicates format name and failed field and gives an
@@ -107,6 +108,9 @@ instance Show SSVReadException where
   show (SSVReadException fmt (line, col) msg) =
     fmt ++ ":" ++ show line ++ ":" ++ show col ++ ": " ++ 
       "read error: " ++ msg
+  show (SSVEOFException fmt msg) =
+    fmt ++ ": read error at end of file: " ++ msg
+
 
 instance Show SSVShowException where
   show (SSVShowException fmt s msg) =
@@ -165,9 +169,9 @@ label fmt csv =
     -- Essentially mapAccumL, but with the test at the end
     -- so that it is fully lazy.
     run :: (SP -> Char -> (SP, C)) -> SP -> [Char] -> [C]
-    run _ (s', pos') [] =
+    run _ (s', _) [] =
       case s' of
-        SQ -> throwRE fmt pos' "unclosed quote in SSV"
+        SQ -> throw $ SSVEOFException (ssvFormatName fmt) "unclosed quote"
         _ -> []
     run f s (x : xs) =
       let (s', c) = f s x in
