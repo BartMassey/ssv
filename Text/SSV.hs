@@ -144,7 +144,8 @@ data C = CX Char | -- character
          CRS |     -- record separator
          CN        -- null token (discarded)
 
-type SP = (S, (Int, Int))
+-- Line and column position in the input.
+type P = (Int, Int)
 
 -- | Convert CR / LF sequences on input to LF (NL). Also convert
 -- other CRs to LF. This is probably the right way to handle CSV
@@ -171,23 +172,25 @@ fromNL =
 -- Run a state machine over the input to classify
 -- all the characters.
 label :: SSVFormat -> String -> [C]
-label fmt csv =
-  run next (sw, (1, 1)) csv
+label fmt =
+  run next incp (1, 1) sw
   where
     -- State for initialization and fallback from end of field.
     sw
       | ssvFormatStripWhite fmt = SW
       | otherwise = SX
     -- Essentially mapAccumL, but with the test at the end
-    -- so that it is fully lazy.
-    run :: (SP -> Char -> (SP, C)) -> SP -> [Char] -> [C]
-    run _ (s', _) [] =
+    -- so that it is fully lazy, and with a "monadic" position.
+    run :: (P -> S -> Char -> (S, C)) -> (P -> Char -> P) ->
+           P -> S -> [Char] -> [C]
+    run _ _ _ s' [] =
       case s' of
         SQ -> throw $ SSVEOFException (ssvFormatName fmt) "unclosed quote"
         _ -> []
-    run f s (x : xs) =
-      let (s', c) = f s x in
-      c : run f s' xs
+    run f pf p s (x : xs) =
+      let (s', c) = f p s x 
+          p' = pf p x in
+      c : run f pf p' s' xs
     -- A bunch of abbreviations for concision.
     rs = ssvFormatTerminator fmt
     fs = ssvFormatSeparator fmt
@@ -202,51 +205,51 @@ label fmt csv =
     qe = isJust qesc
     eq = fromJust qesc
     -- Increment the position in the input various ways.
-    incc (line, col) = (line, col + 1)
-    incl (line, _) = (line + 1, 1)
-    inct (line, col) = (line, tcol) 
-                       where tcol = col + 8 - ((col + 7) `mod` 8)
+    incp (line, _) '\n' = (line + 1, 1)
+    incp (line, col) '\t' = (line, tcol) 
+      where tcol = col + 8 - ((col + 7) `mod` 8)
+    incp (line, col) _ = (line, col + 1)
     -- The actual state machine for the labeler.
-    next :: SP -> Char -> (SP, C)
-    next (SW, pos) ' '     = ((SW, incc pos), CN)
-    next (SW, pos) '\t'    = ((SW, inct pos), CN)
-    next (SW, pos) c 
-      | c == rs            = ((sw, incl pos), CRS)
-      | c == fs            = ((sw, incc pos), CFS)
-      | e && c == ec       = ((SE, incc pos), CN)
-      | q && c == lq       = ((SQ, incc pos), CN)
-      | otherwise          = ((SX, incc pos), CX c)
-    next (SX, pos) '\t'    = ((SX, inct pos), CX '\t')
-    next (SX, pos) c 
-      | c == rs            = ((sw, incl pos), CRS)
-      | c == fs            = ((sw, incc pos), CFS)
-      | e && c == ec       = ((SE, incc pos), CN)
+    next :: P -> S -> Char -> (S, C)
+    next _ SW ' '     = (SW, CN)
+    next _ SW '\t'    = (SW, CN)
+    next _ SW c 
+      | c == rs            = (sw, CRS)
+      | c == fs            = (sw, CFS)
+      | e && c == ec       = (SE, CN)
+      | q && c == lq       = (SQ, CN)
+      | otherwise          = (SX, CX c)
+    next _ SX '\t'    = (SX, CX '\t')
+    next pos SX c 
+      | c == rs            = (sw, CRS)
+      | c == fs            = (sw, CFS)
+      | e && c == ec       = (SE, CN)
       | q && c == lq       = throwRE fmt pos "illegal quote"
-      | otherwise          = ((SX, incc pos), CX c)
-    next (SQ, pos) '\t'    = ((SQ, inct pos), CX '\t')
-    next (SQ, pos) c 
-      | c == rs            = ((SQ, incl pos), CX c)
-      | q && qe && c == eq = ((SZ, incc pos), CN)
-      | q && c == rq       = ((SD, incc pos), CN)
-      | otherwise          = ((SQ, incc pos), CX c)
-    next (SE, pos) '\t'    = ((SX, inct pos), CX '\t')
-    next (SE, pos) c 
-      | c == rs            = ((SX, incl pos), CX c)
-      | otherwise          = ((SX, incc pos), CX c)
-    next (SZ, pos) '\t'    = ((SD, inct pos), CN)
-    next (SZ, pos) ' '     = ((SD, incc pos), CN)
-    next (SZ, pos)  c 
-      | c == rs            = ((sw, incl pos), CRS)
-      | c == fs            = ((sw, incc pos), CFS)
-      | q && qe && c == eq = ((SQ, incc pos), CX c)
-      | q && c == rq       = ((SQ, incc pos), CX c)
-      | q && c == lq       = ((SQ, incc pos), CX c)
+      | otherwise          = (SX, CX c)
+    next _ SQ '\t'    = (SQ, CX '\t')
+    next _ SQ c 
+      | c == rs            = (SQ, CX c)
+      | q && qe && c == eq = (SZ, CN)
+      | q && c == rq       = (SD, CN)
+      | otherwise          = (SQ, CX c)
+    next _ SE '\t'    = (SX, CX '\t')
+    next _ SE c 
+      | c == rs            = (SX, CX c)
+      | otherwise          = (SX, CX c)
+    next _ SZ '\t'    = (SD, CN)
+    next _ SZ ' '     = (SD, CN)
+    next pos SZ  c 
+      | c == rs            = (sw, CRS)
+      | c == fs            = (sw, CFS)
+      | q && qe && c == eq = (SQ, CX c)
+      | q && c == rq       = (SQ, CX c)
+      | q && c == lq       = (SQ, CX c)
       | otherwise          = throwRE fmt pos "illegal escape"
-    next (SD, pos) ' '     = ((SD, incc pos), CN)
-    next (SD, pos) '\t'    = ((SD, inct pos), CN)
-    next (SD, pos) c 
-      | c == rs            = ((sw, incl pos), CRS)
-      | c == fs            = ((sw, incc pos), CFS)
+    next _ SD ' '     = (SD, CN)
+    next _ SD '\t'    = (SD, CN)
+    next pos SD c 
+      | c == rs            = (sw, CRS)
+      | c == fs            = (sw, CFS)
       | otherwise          = throwRE fmt pos "junk after quoted field"
 
 -- Convert the class tokens into a list of rows, each
