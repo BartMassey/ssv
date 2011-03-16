@@ -130,22 +130,11 @@ throwSE :: SSVFormat -> String -> String -> a
 throwSE fmt s msg =
   throw $ SSVShowException (ssvFormatName fmt) s msg
 
--- State of the labeler.
-data S = SW | -- reading a whitespace char
-         SX | -- reading a generic char
-         SQ | -- reading a quoted char
-         SE | -- reading an escaped char
-         SZ | -- reading a quoted-escaped char
-         SD   -- reading a post-quote char
-
 -- Class of token output from the labeler
 data C = CX Char | -- character
          CFS |     -- field separator
          CRS |     -- record separator
          CN        -- null token (discarded)
-
--- Line and column position in the input.
-type P = (Int, Int)
 
 -- | Convert CR / LF sequences on input to LF (NL). Also convert
 -- other CRs to LF. This is probably the right way to handle CSV
@@ -173,24 +162,12 @@ fromNL =
 -- all the characters.
 label :: SSVFormat -> String -> [C]
 label fmt =
-  run next incp (1, 1) sw
+  nextsw (1, 1)
   where
     -- State for initialization and fallback from end of field.
-    sw
-      | ssvFormatStripWhite fmt = SW
-      | otherwise = SX
-    -- Essentially mapAccumL, but with the test at the end
-    -- so that it is fully lazy, and with a "monadic" position.
-    run :: (P -> S -> Char -> (S, C)) -> (P -> Char -> P) ->
-           P -> S -> [Char] -> [C]
-    run _ _ _ s' [] =
-      case s' of
-        SQ -> throw $ SSVEOFException (ssvFormatName fmt) "unclosed quote"
-        _ -> []
-    run f pf p s (x : xs) =
-      let (s', c) = f p s x 
-          p' = pf p x in
-      c : run f pf p' s' xs
+    nextsw p cs
+      | ssvFormatStripWhite fmt = nextSW p cs
+      | otherwise = nextSX p cs
     -- A bunch of abbreviations for concision.
     rs = ssvFormatTerminator fmt
     fs = ssvFormatSeparator fmt
@@ -208,49 +185,57 @@ label fmt =
     incp (line, _) '\n' = (line + 1, 1)
     incp (line, col) '\t' = (line, tcol) 
       where tcol = col + 8 - ((col + 7) `mod` 8)
+    incp (line, _) '\r' = (line, 1)
     incp (line, col) _ = (line, col + 1)
     -- The actual state machine for the labeler.
-    next :: P -> S -> Char -> (S, C)
-    next _ SW ' '     = (SW, CN)
-    next _ SW '\t'    = (SW, CN)
-    next _ SW c 
-      | c == rs            = (sw, CRS)
-      | c == fs            = (sw, CFS)
-      | e && c == ec       = (SE, CN)
-      | q && c == lq       = (SQ, CN)
-      | otherwise          = (SX, CX c)
-    next _ SX '\t'    = (SX, CX '\t')
-    next pos SX c 
-      | c == rs            = (sw, CRS)
-      | c == fs            = (sw, CFS)
-      | e && c == ec       = (SE, CN)
-      | q && c == lq       = throwRE fmt pos "illegal quote"
-      | otherwise          = (SX, CX c)
-    next _ SQ '\t'    = (SQ, CX '\t')
-    next _ SQ c 
-      | c == rs            = (SQ, CX c)
-      | q && qe && c == eq = (SZ, CN)
-      | q && c == rq       = (SD, CN)
-      | otherwise          = (SQ, CX c)
-    next _ SE '\t'    = (SX, CX '\t')
-    next _ SE c 
-      | c == rs            = (SX, CX c)
-      | otherwise          = (SX, CX c)
-    next _ SZ '\t'    = (SD, CN)
-    next _ SZ ' '     = (SD, CN)
-    next pos SZ  c 
-      | c == rs            = (sw, CRS)
-      | c == fs            = (sw, CFS)
-      | q && qe && c == eq = (SQ, CX c)
-      | q && c == rq       = (SQ, CX c)
-      | q && c == lq       = (SQ, CX c)
-      | otherwise          = throwRE fmt pos "illegal escape"
-    next _ SD ' '     = (SD, CN)
-    next _ SD '\t'    = (SD, CN)
-    next pos SD c 
-      | c == rs            = (sw, CRS)
-      | c == fs            = (sw, CFS)
-      | otherwise          = throwRE fmt pos "junk after quoted field"
+    -- reading a whitespace char
+    nextSW p (' ' : cs)    = nextSW (incp p ' ') cs
+    nextSW p ('\t' : cs)   = nextSW (incp p '\t') cs
+    nextSW p (c : cs)
+      | c == rs            = CRS : nextsw (incp p c) cs
+      | c == fs            = CFS : nextsw (incp p c) cs
+      | e && c == ec       = nextSE (incp p c) cs
+      | q && c == lq       = nextSQ (incp p c) cs
+      | otherwise          = CX c : nextSX (incp p c) cs
+    nextSW _ []            = []
+    -- reading a generic char
+    nextSX p (c : cs)
+      | c == rs            = CRS : nextsw (incp p c) cs
+      | c == fs            = CFS : nextsw (incp p c) cs
+      | e && c == ec       = nextSE (incp p c) cs
+      | q && c == lq       = throwRE fmt p "illegal quote"
+      | otherwise          = CX c : nextSX (incp p c) cs
+    nextSX _ []            = []
+    -- reading a quoted char
+    nextSQ p (c : cs) 
+      | c == rs            = CX c : nextSQ (incp p c) cs
+      | q && qe && c == eq = nextSZ (incp p c) cs
+      | q && c == rq       = nextSD (incp p c) cs
+      | otherwise          = CX c : nextSQ (incp p c) cs
+    nextSQ _ []            = throw $ SSVEOFException 
+                               (ssvFormatName fmt) "unclosed quote"
+    -- reading an escaped char
+    nextSE p (c : cs)      = CX c : nextSX (incp p c) cs
+    nextSE _ []            = []
+    -- reading a quoted-escaped char    
+    nextSZ p (' ' : cs)    = nextSD (incp p ' ') cs
+    nextSZ p ('\t' : cs)   = nextSD (incp p '\t') cs
+    nextSZ p (c : cs)
+      | c == rs            = CRS : nextsw (incp p c) cs
+      | c == fs            = CFS : nextsw (incp p c) cs
+      | q && qe && c == eq = CX c : nextSQ (incp p c) cs
+      | q && c == rq       = CX c : nextSQ (incp p c) cs
+      | q && c == lq       = CX c : nextSQ (incp p c) cs
+      | otherwise          = throwRE fmt p "illegal escape"
+    nextSZ _ []            = []
+    -- reading a post-quote char
+    nextSD p (' ' : cs)    = nextSD (incp p ' ') cs
+    nextSD p ('\t' : cs)   = nextSD (incp p '\t') cs
+    nextSD p (c : cs)
+      | c == fs            = CFS : nextsw (incp p c) cs
+      | c == rs            = CRS : nextsw (incp p c) cs
+      | otherwise          = throwRE fmt p "junk after quoted field"
+    nextSD _ []            = []
 
 -- Convert the class tokens into a list of rows, each
 -- consisting of a list of strings.
