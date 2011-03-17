@@ -130,12 +130,6 @@ throwSE :: SSVFormat -> String -> String -> a
 throwSE fmt s msg =
   throw $ SSVShowException (ssvFormatName fmt) s msg
 
--- Class of token output from the labeler
-data C = CX Char | -- character
-         CFS |     -- field separator
-         CRS |     -- record separator
-         CN        -- null token (discarded)
-
 -- | Convert CR / LF sequences on input to LF (NL). Also convert
 -- other CRs to LF. This is probably the right way to handle CSV
 -- data.
@@ -158,10 +152,12 @@ fromNL =
     dirty1 '\n' cs = '\r' : '\n' : cs
     dirty1 c cs = c : cs
 
--- Run a state machine over the input to classify
--- all the characters.
-label :: SSVFormat -> String -> [C]
-label fmt =
+-- | Read using an arbitrary 'SSVFormat'. The input is not
+-- cleaned with 'toNL'; if you want this, do it yourself.
+-- The standard SSV formats 'csvFormat' and 'pwfFormat' are
+-- provided.
+readSSV :: SSVFormat -> String -> [[String]]
+readSSV fmt = 
   nextsw (1, 1)
   where
     -- State for initialization and fallback from end of field.
@@ -192,72 +188,60 @@ label fmt =
     nextSW p (' ' : cs)    = nextSW (incp p ' ') cs
     nextSW p ('\t' : cs)   = nextSW (incp p '\t') cs
     nextSW p (c : cs)
-      | c == rs            = CRS : nextsw (incp p c) cs
-      | c == fs            = CFS : nextsw (incp p c) cs
+      | c == rs            = mkCRS $ nextsw (incp p c) cs
+      | c == fs            = mkCFS $ nextsw (incp p c) cs
       | e && c == ec       = nextSE (incp p c) cs
       | q && c == lq       = nextSQ (incp p c) cs
-      | otherwise          = CX c : nextSX (incp p c) cs
+      | otherwise          = mkCX c $ nextSX (incp p c) cs
     nextSW _ []            = []
     -- reading a generic char
     nextSX p (c : cs)
-      | c == rs            = CRS : nextsw (incp p c) cs
-      | c == fs            = CFS : nextsw (incp p c) cs
+      | c == rs            = mkCRS $ nextsw (incp p c) cs
+      | c == fs            = mkCFS $ nextsw (incp p c) cs
       | e && c == ec       = nextSE (incp p c) cs
       | q && c == lq       = throwRE fmt p "illegal quote"
-      | otherwise          = CX c : nextSX (incp p c) cs
+      | otherwise          = mkCX c $ nextSX (incp p c) cs
     nextSX _ []            = []
     -- reading a quoted char
     nextSQ p (c : cs) 
-      | c == rs            = CX c : nextSQ (incp p c) cs
+      | c == rs            = mkCX c $ nextSQ (incp p c) cs
       | q && qe && c == eq = nextSZ (incp p c) cs
       | q && c == rq       = nextSD (incp p c) cs
-      | otherwise          = CX c : nextSQ (incp p c) cs
+      | otherwise          = mkCX c $ nextSQ (incp p c) cs
     nextSQ _ []            = throw $ SSVEOFException 
                                (ssvFormatName fmt) "unclosed quote"
     -- reading an escaped char
-    nextSE p (c : cs)      = CX c : nextSX (incp p c) cs
+    nextSE p (c : cs)      = mkCX c $ nextSX (incp p c) cs
     nextSE _ []            = []
     -- reading a quoted-escaped char    
     nextSZ p (' ' : cs)    = nextSD (incp p ' ') cs
     nextSZ p ('\t' : cs)   = nextSD (incp p '\t') cs
     nextSZ p (c : cs)
-      | c == rs            = CRS : nextsw (incp p c) cs
-      | c == fs            = CFS : nextsw (incp p c) cs
-      | q && qe && c == eq = CX c : nextSQ (incp p c) cs
-      | q && c == rq       = CX c : nextSQ (incp p c) cs
-      | q && c == lq       = CX c : nextSQ (incp p c) cs
+      | c == rs            = mkCRS $ nextsw (incp p c) cs
+      | c == fs            = mkCFS $ nextsw (incp p c) cs
+      | q && qe && c == eq = mkCX c $ nextSQ (incp p c) cs
+      | q && c == rq       = mkCX c $ nextSQ (incp p c) cs
+      | q && c == lq       = mkCX c $ nextSQ (incp p c) cs
       | otherwise          = throwRE fmt p "illegal escape"
     nextSZ _ []            = []
     -- reading a post-quote char
     nextSD p (' ' : cs)    = nextSD (incp p ' ') cs
     nextSD p ('\t' : cs)   = nextSD (incp p '\t') cs
     nextSD p (c : cs)
-      | c == fs            = CFS : nextsw (incp p c) cs
-      | c == rs            = CRS : nextsw (incp p c) cs
+      | c == fs            = mkCFS $ nextsw (incp p c) cs
+      | c == rs            = mkCRS $ nextsw (incp p c) cs
       | otherwise          = throwRE fmt p "junk after quoted field"
     nextSD _ []            = []
-
--- Convert the class tokens into a list of rows, each
--- consisting of a list of strings.
-collect :: [C] -> [[String]]
-collect =
-  foldr next []
-  where
-    next :: C -> [[String]] -> [[String]]
-    next (CX x) [] = [[[x]]]
-    next (CX x) ([]:rs) = [[x]]:rs
-    next (CX x) ((w:ws):rs) = ((x:w):ws):rs
-    next CFS [] = [["",""]]   -- no newline at end of file
-    next CFS (r:rs) = ("":r):rs
-    next CRS rs = [""]:rs
-    next CN rs = rs
-
--- | Read using an arbitrary 'SSVFormat'. The input is not
--- cleaned with 'toNL'; if you want this, do it yourself.
--- The standard SSV formats 'csvFormat' and 'pwfFormat' are
--- provided.
-readSSV :: SSVFormat -> String -> [[String]]
-readSSV fmt = collect . label fmt
+    -- The collector functions for building up the list.
+    -- character    
+    mkCX x [] = [[[x]]]
+    mkCX x ([]:rss) = [[x]]:rss
+    mkCX x ((w:wss):rss) = ((x:w):wss):rss
+    -- field separator
+    mkCFS [] = [["",""]]   -- no newline at end of file
+    mkCFS (r:rss) = ("":r):rss
+    -- record separator
+    mkCRS rss = [""]:rss
 
 -- | Convert a 'String' representing a CSV file into a
 -- properly-parsed list of rows, each a list of 'String'
