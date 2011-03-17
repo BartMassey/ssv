@@ -1,5 +1,5 @@
 name: ssv
-version: 0.1.1
+version: 0.2
 cabal-version: >= 1.4
 build-type: Simple
 license: MIT
