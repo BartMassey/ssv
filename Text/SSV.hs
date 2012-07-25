@@ -49,7 +49,7 @@ import Control.Exception
 import Data.Char
 import Data.List
 import Data.Maybe
-import Data.Set hiding (map)
+import qualified Data.Set as Set
 import Data.Typeable
 import System.IO
 
@@ -285,7 +285,7 @@ showSSV fmt =
       where
         -- Set of characters that require a field to be quoted.
         -- XXX This maybe could be kludgier, but I don't know how.
-        scaryChars = fromList $ concat $ catMaybes [
+        scaryChars = Set.fromList $ concat $ catMaybes [
            Just [ssvFormatTerminator fmt],
            Just [ssvFormatSeparator fmt],
            fmap (:[]) $ ssvFormatEscape fmt,
@@ -310,7 +310,7 @@ showSSV fmt =
                   Nothing -> throwSE fmt s "unquotable character in field"
           | otherwise = s
             where
-              notOkChar c | member c scaryChars = True
+              notOkChar c | Set.member c scaryChars = True
               notOkChar c | isSeparator c = ssvFormatStripWhite fmt
               notOkChar c | isPrint c = False
               notOkChar _ = True
