@@ -286,7 +286,7 @@ showSSV fmt =
   concatMap showRow
   where
     showRow = 
-      (++ "\n") . intercalate "," . map showField
+      (++ "\n") . intercalate [ssvFormatSeparator fmt] . map showField
       where
         -- Quote the field as needed.
         showField s
