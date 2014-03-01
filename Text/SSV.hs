@@ -67,7 +67,7 @@ data SSVFormat = SSVFormat {
   ssvFormatTerminator :: Char, -- ^ End of row.
   ssvFormatSeparator :: Char, -- ^ Field separator.
   ssvFormatEscape :: Maybe Char, -- ^ Escape character outside of quotes.
-  ssvFormatStripWhite :: Bool, -- ^ Strip "extraneous" spaces and tabs.
+  ssvFormatStripWhite :: Bool, -- ^ Strip "extraneous" spaces and tabs next to separators on input.
   ssvFormatQuote :: Maybe SSVFormatQuote } -- ^ Quote format.
 
 -- | 'SSVFormat' for CSV data. Closely follows RFC 4180.
@@ -275,7 +275,9 @@ readCSV = readSSV csvFormat . toNL
 -- effort is made to \"intelligently\" quote the fields; in
 -- the worst case an 'SSVShowException' will be thrown to
 -- indicate that a field had characters that could not be
--- quoted.
+-- quoted. Spaces or tabs in input fields only causes quoting
+-- if they are adjacent to a separator, and then only if
+-- 'ssvFormatStripWhite' is 'True'.
 showSSV :: SSVFormat -> [[String]] -> String
 showSSV fmt = 
   concatMap showRow
@@ -283,19 +285,9 @@ showSSV fmt =
     showRow = 
       (++ "\n") . intercalate "," . map showField
       where
-        -- Set of characters that require a field to be quoted.
-        -- XXX This maybe could be kludgier, but I don't know how.
-        scaryChars = Set.fromList $ concat $ catMaybes [
-           Just [ssvFormatTerminator fmt],
-           Just [ssvFormatSeparator fmt],
-           fmap (:[]) $ ssvFormatEscape fmt,
-           fmap ((:[]) . ssvFormatQuoteLeft) $ ssvFormatQuote fmt, 
-           case ssvFormatStripWhite fmt of
-             True -> Just " \t"
-             False -> Nothing ]
         -- Quote the field as needed.
         showField s
-          | any notOkChar s = 
+          | any needsQuoteChar s || endIsWhite s =
             case ssvFormatQuote fmt of
               Just qfmt ->
                 if isJust (ssvFormatQuoteEscape qfmt) ||
@@ -310,10 +302,29 @@ showSSV fmt =
                   Nothing -> throwSE fmt s "unquotable character in field"
           | otherwise = s
             where
-              notOkChar c | Set.member c scaryChars = True
-              notOkChar c | isSeparator c = ssvFormatStripWhite fmt
-              notOkChar c | isPrint c = False
-              notOkChar _ = True
+              needsQuoteChar c
+                  | Set.member c quotableChars = True
+                  | isPrint c = False
+                  | otherwise = True
+                  where
+                    -- Set of characters that require a field to be quoted.
+                    -- XXX This maybe could be kludgier, but I don't know how.
+                    quotableChars =
+                        Set.fromList $ concat $ catMaybes [
+                          Just [ssvFormatTerminator fmt],
+                          Just [ssvFormatSeparator fmt],
+                          fmap (:[]) $ ssvFormatEscape fmt,
+                          fmap ((:[]) . ssvFormatQuoteLeft) $
+                            ssvFormatQuote fmt ]
+              endIsWhite _ | not (ssvFormatStripWhite fmt) = False
+              endIsWhite "" = False
+              endIsWhite s' =
+                  let firstChar = head s'
+                      lastChar = last s'
+                      whiteChars = " \t"
+                  in
+                  firstChar `elem` whiteChars ||
+                  lastChar `elem` whiteChars
               quote qfmt s' = [ssvFormatQuoteLeft qfmt] ++
                               qescape qfmt s' ++
                               [ssvFormatQuoteRight qfmt]
@@ -321,7 +332,7 @@ showSSV fmt =
                 foldr escape1 "" s'
                 where
                   escape1 c cs
-                    | notOkChar c = esc : c : cs
+                    | needsQuoteChar c = esc : c : cs
                     | otherwise = c : cs
               qescape qfmt s' =
                 case ssvFormatQuoteEscape qfmt of
