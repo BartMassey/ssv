@@ -67,8 +67,9 @@ data SSVFormat = SSVFormat {
   ssvFormatTerminator :: Char, -- ^ End of row.
   ssvFormatSeparator :: Char, -- ^ Field separator.
   ssvFormatEscape :: Maybe Char, -- ^ Escape character outside of quotes.
-  ssvFormatStripWhite :: Bool, -- ^ Strip "extraneous" spaces and tabs next to separators on input.
-  ssvFormatQuote :: Maybe SSVFormatQuote } -- ^ Quote format.
+  ssvFormatStripWhite :: Bool, -- ^ Strip "extraneous" whitespace next to separators on input.
+  ssvFormatQuote :: Maybe SSVFormatQuote, -- ^ Quote format.
+  ssvFormatWhiteChars :: String } -- ^ Characters regarded as whitespace.
 
 -- | 'SSVFormat' for CSV data. Closely follows RFC 4180.
 csvFormat :: SSVFormat
@@ -81,7 +82,8 @@ csvFormat = SSVFormat {
   ssvFormatQuote = Just $ SSVFormatQuote {
     ssvFormatQuoteEscape = Just '"',
     ssvFormatQuoteLeft = '"',
-    ssvFormatQuoteRight = '"' } }
+    ssvFormatQuoteRight = '"' },
+  ssvFormatWhiteChars = " \t" }
 
 -- | 'SSVFormat' for UNIX \"password file\" data, i.e. colon-separated
 -- fields with no escape convention.
@@ -92,7 +94,8 @@ pwfFormat = SSVFormat {
   ssvFormatSeparator = ':',
   ssvFormatEscape = Nothing,
   ssvFormatStripWhite = False,
-  ssvFormatQuote = Nothing }
+  ssvFormatQuote = Nothing,
+  ssvFormatWhiteChars = "" }
 
 -- | Indicates format name, line and column and gives an error message.
 data SSVReadException = SSVReadException String (Int, Int) String
@@ -321,10 +324,9 @@ showSSV fmt =
               endIsWhite s' =
                   let firstChar = head s'
                       lastChar = last s'
-                      whiteChars = " \t"
                   in
-                  firstChar `elem` whiteChars ||
-                  lastChar `elem` whiteChars
+                  firstChar `elem` ssvFormatWhiteChars fmt ||
+                  lastChar `elem` ssvFormatWhiteChars fmt
               quote qfmt s' = [ssvFormatQuoteLeft qfmt] ++
                               qescape qfmt s' ++
                               [ssvFormatQuoteRight qfmt]
