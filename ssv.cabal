@@ -1,5 +1,5 @@
 name: ssv
-version: 0.2.1
+version: 0.3
 cabal-version: >= 1.10
 build-type: Simple
 license: MIT
@@ -18,7 +18,7 @@ description:
    adhere to the spirit and (mostly) to the letter of RFC
    4180, which defines the 'text/csv' MIME type.
 category: Text
-tested-with: GHC == 6.12.1
+tested-with: GHC >= 6.12.1 && <= 7.6.3
 
 source-repository head
   type: git
@@ -27,7 +27,7 @@ source-repository head
 source-repository this
   type: git
   location: https://github.com/BartMassey/ssv.git
-  tag: v0.2.1
+  tag: v0.3
 
 library
   default-language: Haskell2010
