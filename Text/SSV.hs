@@ -99,7 +99,7 @@ pwfFormat = SSVFormat {
 
 -- | Indicates format name, line and column and gives an error message.
 data SSVReadException = SSVReadException String (Int, Int) String
-     		      | SSVEOFException String String
+                      | SSVEOFException String String
                         deriving Typeable
 
 -- | Indicates format name and failed field and gives an
